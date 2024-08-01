@@ -82,6 +82,28 @@ fn read_transactions(mempool_dir: &str) -> Vec<Transaction> {
     transactions
 }
 
+
+fn validate_transaction(tx: &Transaction) -> bool {
+    // Check if the transaction has at least one input and one output
+    if tx.vin.is_empty() || tx.vout.is_empty() {
+        return false;
+    }
+
+    // Check if the transaction size and weight are within acceptable limits
+    if tx.size > 100_000 || tx.weight > 400_000 {
+        return false;
+    }
+
+    true
+}
+
+fn validate_transactions(transactions: &[Transaction]) -> Vec<Transaction> {
+    transactions.iter().filter(|tx| validate_transaction(tx)).cloned().collect()
+}
+
+
+
+
 fn main() {
     let mempool_dir = "../../mempool";
     //let difficulty_target = "0000ffff00000000000000000000000000000000000000000000000000000000";
@@ -91,5 +113,17 @@ fn main() {
     } else {
         println!("No transactions found.");
     }
+    // Validate transactions
+    let valid_transactions = validate_transactions(&transactions);
+
+    // Calculate the number of transactions that did not pass validation
+    let original_count = transactions.len();
+    let valid_count = valid_transactions.len();
+    let invalid_count = original_count - valid_count;
+
+    println!("Total transactions in mempool: {}", original_count);
+    println!("Valid transactions: {}", valid_count);
+    println!("Invalid transactions: {}", invalid_count);
+    
 }
 
