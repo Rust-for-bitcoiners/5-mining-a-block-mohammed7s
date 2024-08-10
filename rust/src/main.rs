@@ -1,14 +1,23 @@
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use std::fs;
-//use std::path::Path;
+use std::path::Path;
+use std::env;
+
+use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use bitcoin::{BlockHash, TxMerkleNode};
 
 use bitcoin::blockdata::transaction::{Transaction, TxIn, TxOut, Sequence}; 
-use bitcoin::hashes::sha256d;
+use bitcoin::hashes::{sha256d, Hash};
 use bitcoin::absolute::LockTime;
 use bitcoin::{Address, PublicKey, Network, merkle_tree};
 use bitcoin::secp256k1::{rand, Secp256k1};
 use bitcoin::blockdata::script::ScriptBuf;
+use bitcoin::block::{Header, Version};
+
 
 
 
@@ -67,6 +76,15 @@ struct Status {
 
 
 fn read_transactions(mempool_dir: &str) -> Vec<MempoolTransaction> {
+    // Print the current working directory
+    let current_dir = env::current_dir().unwrap();
+    println!("Current working directory: {:?}", current_dir);
+
+    // Print the full path to the mempool directory
+    let full_path = Path::new(mempool_dir).canonicalize().unwrap();
+    println!("Full path to mempool directory: {:?}", full_path);
+    
+
     let mut transactions = Vec::new();
     let paths = fs::read_dir(mempool_dir).unwrap();
 
@@ -153,26 +171,30 @@ fn calculate_merkle_root(transactions: &[Transaction]) -> sha256d::Hash {
     let txids: Vec<_> = transactions.iter().map(|tx| tx.txid().to_raw_hash()).collect();
     merkle_tree::calculate_root(txids.into_iter()).expect("Failed to calculate Merkle root")
 }
-// fn mine_block(header: &BlockHeader, difficulty_target: &str) -> (BlockHeader, u64) {
-//     let mut nonce = 0;
-//     let mut rng = rand::thread_rng();
-//     let target = sha256d::Hash::from_str(difficulty_target).unwrap();
-//     let mut block_header = header.clone();
 
-//     loop {
-//         block_header.nonce = nonce;
-//         let block_hash = block_header.block_hash();
-//         if block_hash <= target {
-//             return (block_header, nonce);
-//         }
-//         nonce = rng.gen();
-//     }
-// }
+fn mine_block(header: &Header, difficulty_target: &str) -> (Header, u64) {
+    let mut nonce:u32 = 0;
+    let mut block_header = header.clone();
+    //let mut rng = rand::thread_rng();
+    let target = BlockHash::from_str(difficulty_target).unwrap();
+    println!("Target: {:x}", target);
+
+    loop {
+        block_header.nonce = nonce;
+        let block_hash = block_header.block_hash();
+        println!("Nonce: {}, Hash: {:x}", nonce, block_hash);
+        if block_hash <= target {
+            return (block_header, nonce.into());
+        }
+        nonce += 1;
+    }
+}
 
 fn main() {
-    let mempool_dir = "../../mempool";
-    //let difficulty_target = "0000ffff00000000000000000000000000000000000000000000000000000000";
-    
+    let mempool_dir = "../mempool";
+    let difficulty_target = "0000ffff00000000000000000000000000000000000000000000000000000000";
+    //let difficulty_target = "00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
     // Generate a random key pair and create a new address
     let s = Secp256k1::new();
     let public_key = PublicKey::new(s.generate_keypair(&mut rand::thread_rng()).1);
@@ -219,20 +241,37 @@ fn main() {
 
     let merkle_root = calculate_merkle_root(&block_transactions);
     println!("merkle root: {:?}", merkle_root);
-    // let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
-    // let header = BlockHeader {
-    //     version: 1,
-    //     prev_blockhash: prev_block_hash,
-    //     merkle_root,
-    //     time: timestamp,
-    //     bits: 0x1d00ffff,
-    //     nonce: 0,
-    // };
-    // let (mined_header, nonce) = mine_block(&header, difficulty_target);
-    // let block = Block {
-    //     header: mined_header,
-    //     txdata: block_transactions,
-    // };
+
+    // add current timestamp to block 
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
+    println!("timestamp: {:?}", timestamp); 
+    // placeholder previous block hash for testing.
+    let zero_hash = [0u8; 32];
+    let prev_block_hash = BlockHash::from_slice(&zero_hash).unwrap();
+    let merkle_root: TxMerkleNode = merkle_root.into();  
+
+    let header = Header {
+        version: Version::TWO, 
+        prev_blockhash: prev_block_hash,
+        merkle_root,
+        time: timestamp,
+        bits: bitcoin::CompactTarget::from_hex("0x1d00ffff").unwrap(), 
+        nonce: 0,
+    };
+    
+    
+    let (mined_header, nonce) = mine_block(&header, difficulty_target);
+    // Write the block header, coinbase transaction, and txids to out.txt
+    let mut output = String::new();
+    output.push_str(&format!("{:?}\n", mined_header));
+    output.push_str(&format!("{:?}\n", coinbase_tx.txid()));
+    for tx in &block_transactions {
+        output.push_str(&format!("{:?}\n", tx.txid()));
+    }
+
+    fs::write("out.txt", output).expect("Unable to write file");
+
+    println!("Block mined and written to out.txt");
 
 }
 
